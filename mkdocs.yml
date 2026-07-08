@@ -1,0 +1,115 @@
+site_name: Smart Home 米家整合筆記
+site_description: 用 CLI / MCP / Agent Skills 控制米家（Xiaomi Mijia），以及與 Apple Home、Google Home、開源 HomeKit 聯動的整合筆記
+site_url: https://daviddwlee84.github.io/SmartHome/
+repo_url: https://github.com/daviddwlee84/SmartHome
+repo_name: daviddwlee84/SmartHome
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: zh-TW
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+
+plugins:
+  - search
+  - llmstxt:
+      full_output: llms-full.txt
+      markdown_description: >
+        Documentation for Smart Home 米家整合筆記
+      sections:
+        指南:
+          - index.md
+          - getting-started.md
+        方案比較:
+          - solutions/index.md
+          - solutions/home-assistant.md
+  - copy-to-llm:
+      repo_url: "https://daviddwlee84.github.io/SmartHome/"
+      button_hover_color: "var(--md-primary-fg-color)"
+      toast_bg_color: "var(--md-primary-fg-color)"
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - tables
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path:
+        - .
+        - docs
+        - docs/_snippets
+      check_paths: true
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - 首頁: index.md
+  - 概念:
+      - 本地 vs 雲端: concepts/local-vs-cloud.md
+      - 帳號分區與地區: concepts/account-region.md
+      - 認證與 Token: concepts/auth-token.md
+      - Matter: concepts/matter.md
+  - 控制介面:
+      - CLI: control/cli.md
+      - MCP 與 Agent Skills: control/mcp.md
+  - 生態聯動:
+      - Apple Home / Siri: ecosystem/apple-home.md
+      - Google Home: ecosystem/google-home.md
+      - 開源 HomeKit: ecosystem/open-source-homekit.md
+  - 方案比較:
+      - solutions/index.md
+      - Home Assistant 中樞: solutions/home-assistant.md
+      - MijiaPilot: solutions/mijiapilot.md
+      - 點對點橋接: solutions/point-to-point.md
+  - 參考:
+      - 我的裝置: reference/devices.md
+      - 連結彙整: reference/links.md
+      - 本站開發: getting-started.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/daviddwlee84/SmartHome
+
+# `_snippets/` are meant to be included via pymdownx.snippets, never
+# rendered as their own page. `not_in_nav` suppresses the INFO warning.
+not_in_nav: |
+  /_snippets/
