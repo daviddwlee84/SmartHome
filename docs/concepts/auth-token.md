@@ -4,43 +4,69 @@
 
 | 認證 | 取得方式 | 適用控制路徑 | 受[區域](account-region.md)影響？ |
 |---|---|---|---|
-| 裝置 **token** | 從小米雲端拉取（`miiocli cloud` 或抽取工具） | 本地 miIO/LAN 直控 | ✅ 要選對區才列得到 |
-| 帳號 **QR 登入** | 掃碼登入小米帳號 | 雲端 API（mijiaAPI / 多數 MCP） | ✅ 登入到對應區 |
+| 裝置 **token** | 從小米雲端拉取，或離線抽 App 備份 | 本地 miIO/LAN 直控 | ✅ 要對區 |
+| 帳號 **QR 登入** | 掃碼登入小米帳號 | 雲端 API | ✅ 登入到對應區 |
 
 !!! danger "token 是裝置機密"
-    device token 等於該裝置的控制金鑰，**不要**提交進 git、貼到公開場合或分享。抽出來的 token 建議存在本機受保護的設定檔。
+    device token 等於該裝置的控制金鑰，**不要**提交進 git／貼到公開場合。本 repo 的 `.secrets/` 已 gitignore，抽出來的 token 放那裡。
 
-## 方法一：`miiocli cloud` 抓 token（本地路線）
+!!! warning "2026 實測結論（先看這個）"
+    - `miiocli cloud`（底層 `micloud`）現在**多半登入失敗**——小米在密碼流加了 captcha＋2FA，而且它的 locale 清單**沒有 `tw`**，台灣帳號抓不到。詳見[登入疑難排解](login-troubleshooting.md)。
+    - QR 登入的 `mijiaAPI` / `miot-mcp` 會**把你的 session token 走第三方 proxy `api.mijia.tech`**，而且拿不到 local token——只適合純雲端控制。
+    - **要 token 就用本 repo 的 `mi-tokens`**（薄包 [Xiaomi-cloud-tokens-extractor](https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor)：免密碼 QR、只連官方、支援 tw/sg）。
 
-[`python-miio`](../control/cli.md) 內建雲端指令，用帳號登入後列出每台裝置的 IP 與 token：
+## 推薦：`mi-tokens`（官方 QR 抽 token）
+
+本 repo 內建 `tools/mi_tokens.py`，免密碼 QR 登入**官方**小米雲，抽出每台 token + 本地 IP + BLE key：
 
 ```bash
-pip install python-miio
-miiocli cloud            # 依提示輸入帳號、密碼，以及 locale/region
+uv run --group tokens python tools/mi_tokens.py extract
+#  → 印出 http://127.0.0.1:31415，開瀏覽器用「米家 App」掃碼
+#  → 掃完抓 tw,sg,cn 三區，寫到 .secrets/mi-tokens.json (chmod 600) + .secrets/devices.md
+uv run --group tokens python tools/mi_tokens.py list                # 離線重印（token 預設遮蔽，--show 顯示）
+uv run --group tokens python tools/mi_tokens.py verify --did <DID>  # 用 miiocli 本地驗證某台 token 可用
 ```
 
-- 會列出裝置的 `did`、**IP**、**token**、model 等。
-- 拿到後就能離線本地直控：`miiocli device --ip <IP> --token <TOKEN> info`。
-- **region 要選對**（見[帳號分區](account-region.md)），否則清單是空的。
+- 只連 `account.xiaomi.com` + `{region}.api.io.mi.com`（官方），**不經第三方**。
+- 預設掃 `tw, sg, cn`（台灣帳號的裝置常在 tw 或 sg）；`--server tw` 可指定。
+- 拿到 token 後即可本地直控：`uv run --group miio miiocli device --ip <IP> --token <TOKEN> info`。
 
-### 當 `miiocli cloud` 失效時（fallback）
+## 其他方法
 
-小米偶爾改版登入流程，導致 `miiocli cloud` 登入失敗。常見備援：
+### `miiocli cloud`（本地 token，但現在多半壞）
 
-- **`Xiaomi-cloud-tokens-extractor`**（`PiotrMachowski/Xiaomi-cloud-tokens-extractor`）：社群最常用的獨立抽取工具，會問 region、逐區列出裝置與 token。
-- 直接用 `miio.cloud` 模組的 `CloudInterface.get_devices()` 自己寫 script 抓。
-- 改走 QR 登入類工具（見下），繞過 token。
+```bash
+uv run --group miio miiocli cloud list
+```
+`python-miio` 內建，但底層 `micloud` 已停更、密碼流被 captcha/2FA 擋（回 `Access denied`），且 locale **無 `tw`**。台灣帳號基本上用不了——改用上面的 `mi-tokens`。細節見[登入疑難排解](login-troubleshooting.md)。
 
-## 方法二：QR 登入（雲端路線）
+### QR 純雲端控制（`mijiaAPI` / `miot-mcp`）
 
-雲端方案（`mijiaAPI`、[`miot-mcp`](../control/mcp.md) 等）多半**只支援掃碼登入**：
+```bash
+uv run --group mijia mijiaAPI login          # QR 免密碼，存 ~/.config/mijia-api/auth.json
+uv run --group mijia mijiaAPI --list_devices
+uv run --group mijia mijiaAPI mcp            # 內建 MCP server（stdio），可掛給 Claude
+```
+免密碼、給 Claude 控制很方便，**但有代價**：
 
-- 啟動服務 → 產生 QR → 用米家 App 掃碼授權。
-- 授權後把 session 存在本機（例如 `miot-mcp` 存在 `~/.miot-mcp/auth_data.json`）。
-- 不需要逐台 token，帳號看得到的裝置就能控；但每次指令走雲端。
+!!! danger "會走第三方 proxy、且拿不到 token"
+    `mijiaAPI`（`miot-mcp` 也用它）把 `serviceToken`/`ssecurity` 和每條裝置指令送到 **`api.mijia.tech`（非官方、作者自架）**，等於一個受信任的 MITM；而且**拿不到 local token**、沒有 tw 區切換。在意隱私就別用；要 token 用 `mi-tokens`。
 
-## 該用哪一種？
+### 離線 app-backup（`miio-extract-tokens`）
 
-- 想要**本地、低延遲、離線** → 走 token（方法一）。
-- 想要**最省事、覆蓋最廣**、或設備本來就只能雲端（BLE／紅外線） → 走 QR（方法二）。
-- 兩者其實常常並用：本地能控的走 token，其餘走雲端。
+完全不連網，從 Mi Home 的 Android 備份讀 token：
+```bash
+uv run --group miio miio-extract-tokens mibackup.ab   # 加密備份加 --password <pw>
+```
+最私密，但 **`adb backup` 在 Android 12+ 已幾乎失效**、新版米家設 `allowBackup=false`，實際只在舊 Android／root 手機可行。
+
+## 該用哪一種
+
+| 你要 | 用 |
+|---|---|
+| **local token 做 LAN 直控**（推薦） | `mi-tokens`（官方 QR） |
+| 純雲端控制、給 Claude、可接受第三方 proxy | `mijiaAPI` / `miot-mcp`（QR） |
+| 完全離線、有配對過的舊 Android | `miio-extract-tokens` |
+| （歷史）`miiocli cloud` | 多半已壞，見[登入疑難排解](login-troubleshooting.md) |
+
+深入的失敗原因、安全驗證、tw 區陷阱 → **[登入疑難排解](login-troubleshooting.md)**。

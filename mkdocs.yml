@@ -86,6 +86,7 @@ nav:
       - 本地 vs 雲端: concepts/local-vs-cloud.md
       - 帳號分區與地區: concepts/account-region.md
       - 認證與 Token: concepts/auth-token.md
+      - 登入疑難排解: concepts/login-troubleshooting.md
       - Matter: concepts/matter.md
   - 控制介面:
       - CLI: control/cli.md

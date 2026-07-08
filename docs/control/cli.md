@@ -19,7 +19,7 @@ miiocli device --ip <IP> --token <TOKEN> info   # 直控某台裝置
 ```
 
 - **優點**：本地、低延遲、無雲端依賴。
-- **缺點**：新設備本地協議可能被鎖；小米雲端登入偶爾改版導致抓 token 卡關（見 [認證與 Token](../concepts/auth-token.md) 的 fallback）。
+- **缺點**：新設備本地協議可能被鎖；`miiocli cloud` 抓 token 現在**多半失敗**（小米密碼流加了 captcha/2FA，且 locale 無 `tw`）。要抓 token 改用本 repo 的 `mi-tokens`（官方 QR、支援 tw/sg），見 [認證與 Token](../concepts/auth-token.md) 與[登入疑難排解](../concepts/login-troubleshooting.md)。
 
 ## MijiaPilot 的 CLI
 

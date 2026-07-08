@@ -14,6 +14,9 @@
 
 > 直接的米家 MCP 多走[雲端 QR 登入](../concepts/auth-token.md)、把 session 存在本機（如 `~/.miot-mcp/`）。想要品牌無關、一次控制所有設備，走 HA 內建 MCP。
 
+!!! danger "miot-mcp / mijiaAPI 會走第三方 proxy"
+    `miot-mcp` 內建的 `mijiaAPI` 把你的 `serviceToken`/`ssecurity` 和每條裝置指令送到 **`api.mijia.tech`（非小米官方、作者自架）**，等於受信任的 MITM，且拿不到 local token。在意隱私就別用它當控制層——改用 HA 內建 MCP（走官方），或見[登入疑難排解](../concepts/login-troubleshooting.md)。
+
 ## 在 Claude Code 接上 MCP
 
 大致流程（以 `miot-mcp` 為例）：

@@ -3,7 +3,7 @@
 逐台記錄你手上的米家設備與它的控制路徑。**先放模板**——把你的型號填進來（或把清單給我，我幫你補 Matter／本地／HomeKit 判定）。
 
 !!! tip "怎麼拿到 model id 與 token"
-    用 `miiocli cloud` 或抽取工具列出裝置，會有 `model`（如 `yeelink.light.xxxx`）與 token。見[認證與 Token](../concepts/auth-token.md)。
+    最快：`uv run --group tokens python tools/mi_tokens.py extract`（官方 QR，見[認證與 Token](../concepts/auth-token.md)）會把每台的 `model`、token、本地 IP 寫進 `.secrets/devices.md`，直接複製過來（記得把 token 遮掉再提交）。
 
 | 裝置 | 型號（model id） | 連線 | 本地可控？ | token 取得 | Matter？ | 現用控制路徑 |
 |---|---|---|---|---|---|---|
