@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "mkdocs-site-bootstrap": {
+      "source": "daviddwlee84/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/local/mkdocs-site-bootstrap/SKILL.md",
+      "computedHash": "e8aab23a5cf942887954003617ec5e700ad52968cddc8f809e2534a9773af06b"
+    }
+  }
+}
