@@ -237,6 +237,144 @@ def cmd_verify(a: argparse.Namespace) -> int:
         return 1
 
 
+# ---------- IR: enumerate cloud miir.* remotes ----------
+SESSION_JSON = SECRETS_DIR / "mi-session.json"
+IR_JSON = SECRETS_DIR / "mi-ir.json"
+
+
+def _load_session() -> dict | None:
+    if not SESSION_JSON.exists():
+        return None
+    try:
+        return json.loads(SESSION_JSON.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _save_session(conn) -> None:
+    _write_secret(SESSION_JSON, json.dumps({
+        "userId": conn.userId, "ssecurity": conn._ssecurity,
+        "serviceToken": conn._serviceToken,
+    }, indent=2))
+
+
+def _connector(mod, force_login: bool = False):
+    """回傳登入好的 connector；能沿用 .secrets/mi-session.json 就不重掃 QR。"""
+    conn = mod.QrCodeXiaomiCloudConnector()
+    sess = None if force_login else _load_session()
+    if sess and sess.get("serviceToken") and sess.get("ssecurity") and sess.get("userId"):
+        conn.userId = sess["userId"]
+        conn._ssecurity = sess["ssecurity"]
+        conn._serviceToken = sess["serviceToken"]
+        return conn, True
+    print("[mi-tokens] 免密碼 QR 登入 — 開瀏覽器掃碼（見下方網址），用『米家 App』掃：")
+    if not conn.login():
+        raise SystemExit("[mi-tokens] 登入失敗（QR 逾時或被取消）")
+    _save_session(conn)
+    return conn, False
+
+
+def _api(conn, country: str, path: str, payload: dict):
+    url = conn.get_api_url(country) + path
+    params = {"data": json.dumps(payload, separators=(",", ":"))}
+    return conn.execute_api_call_encrypted(url, params)
+
+
+def _fetch_devices(conn, regions: list[str]) -> dict:
+    """did -> {model,name,region,parent_id}，跨區。"""
+    devmap: dict[str, dict] = {}
+    for country in regions:
+        homes: list[tuple] = []
+        h = conn.get_homes(country)
+        if h and h.get("result"):
+            for x in h["result"].get("homelist", []) or []:
+                homes.append((x["id"], conn.userId))
+        cnt = conn.get_dev_cnt(country)
+        if cnt and cnt.get("result"):
+            for x in cnt["result"].get("share", {}).get("share_family", []) or []:
+                homes.append((x["home_id"], x["home_owner"]))
+        for home_id, owner in homes:
+            resp = conn.get_devices(country, home_id, owner)
+            for d in ((resp or {}).get("result") or {}).get("device_info") or []:
+                did = str(d.get("did", ""))
+                if did and did not in devmap:
+                    devmap[did] = {
+                        "model": d.get("model", ""), "name": d.get("name", ""),
+                        "region": country, "parent_id": str(d.get("parent_id", "") or ""),
+                    }
+    return devmap
+
+
+def _keys_have_code(keys_resp) -> tuple[int, bool]:
+    """(鍵數, 是否有任何 raw code)。回應結構不確定，盡量容錯。"""
+    res = (keys_resp or {}).get("result")
+    keys = res.get("keys") or res.get("list") or [] if isinstance(res, dict) else (res or [])
+    has_code = any(
+        isinstance(k, dict) and (k.get("code") or k.get("ir_code") or k.get("value"))
+        for k in (keys if isinstance(keys, list) else [])
+    )
+    return (len(keys) if isinstance(keys, list) else 0), has_code
+
+
+def cmd_ir(a: argparse.Namespace) -> int:
+    """列出雲端 miir.* 遙控、其 parent blaster、以及 DIY(有 raw code) vs 品牌配對。"""
+    mod = _load_extractor()
+    conn, reused = _connector(mod, force_login=a.relogin)
+    regions = a.server or DEFAULT_REGIONS
+    devmap = _fetch_devices(conn, regions)
+    if not devmap and reused:
+        print("[mi-tokens] session 可能過期，改重新 QR 登入 …")
+        conn, reused = _connector(mod, force_login=True)
+        devmap = _fetch_devices(conn, regions)
+    if reused:
+        print("[mi-tokens] 沿用已存 session（--relogin 可強制重登）")
+
+    miirs = {did: v for did, v in devmap.items() if v["model"].startswith("miir")}
+    if not miirs:
+        print(f"[mi-tokens] 這些區沒找到 miir.* 遙控：{regions}", file=sys.stderr)
+        return 1
+
+    dump, rows = {}, []
+    for did, v in miirs.items():
+        country = v["region"]
+        parent = devmap.get(v["parent_id"], {})
+        keys_resp = _api(conn, country, "/v2/irdevice/controller/keys", {"did": did})
+        info_resp = _api(conn, country, "/v2/irdevice/controller/info", {"did": did})
+        nkeys, _ = _keys_have_code(keys_resp)
+        info_res = (info_resp or {}).get("result") or {}
+        try:
+            cid = int(info_res.get("controller_id") or 0)
+        except (TypeError, ValueError):
+            cid = 0
+        brand = info_res.get("brand_id")
+        if cid > 0:
+            kind = "品牌配對"
+        elif info_res.get("controller_id") is not None:
+            kind = "DIY(自學)"
+        else:
+            kind = "未知"
+        dump[did] = {
+            "model": v["model"], "name": v["name"], "region": country,
+            "parent_id": v["parent_id"], "parent_model": parent.get("model", "?"),
+            "parent_name": parent.get("name", ""), "keys": nkeys, "kind": kind,
+            "controller_id": cid, "brand_id": brand,
+            "raw_keys": keys_resp, "raw_info": info_resp,
+        }
+        rows.append((v["model"], v["name"], parent.get("model", "?"), nkeys, kind, cid or "—"))
+
+    _write_secret(IR_JSON, json.dumps(dump, ensure_ascii=False, indent=2))
+    parents = sorted({r[2] for r in rows})
+    print(f"\n[mi-tokens] {len(rows)} 個 miir.* 遙控 → {IR_JSON} (chmod 600，含原始 keys/info)\n")
+    print("| 遙控 model | 名稱 | parent blaster | 鍵數 | 類型 | matchid |")
+    print("|---|---|---|---|---|---|")
+    for r in rows:
+        print(f"| {r[0]} | {r[1]} | {r[2]} | {r[3]} | {r[4]} | {r[5]} |")
+    print(f"\nparent blaster：{', '.join(parents)}")
+    print("判讀：品牌配對 → 碼在小米碼庫(matchid)，可解成 pronto；DIY(自學) → 雲端 learn、碼不直接匯出。")
+    print("兩者要本地重播都需要一顆能本地控的 blaster（chuangmi.ir.v2）；小愛音箱沒有本地 IR API。")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(
         prog="mi-tokens",
@@ -258,10 +396,16 @@ def main() -> int:
     add_common(pl)
     pl.set_defaults(func=cmd_list)
 
-    pv = sub.add_parser("verify", help="用 miiocli 本地驗證某台 token")
+    pv = sub.add_parser("verify", help="本地驗證某台 token（LAN，自動 ARP 解 IP）")
     add_common(pv)
     pv.add_argument("--did", required=True, help="要驗證的裝置 did")
     pv.set_defaults(func=cmd_verify)
+
+    pi = sub.add_parser("ir", help="列出雲端 miir.* 遙控：parent blaster + DIY/品牌配對")
+    add_common(pi)
+    pi.add_argument("--server", action="append", help="區域(可重複)；預設 tw sg cn")
+    pi.add_argument("--relogin", action="store_true", help="強制重新 QR 登入（忽略存的 session）")
+    pi.set_defaults(func=cmd_ir)
 
     a = p.parse_args()
     if not getattr(a, "func", None):

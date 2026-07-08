@@ -15,7 +15,7 @@
 | `chuangmi.ir.v2` / `chuangmi.remote.v2`（萬能遙控器） | `ChuangmiIr` | ✅ `learn`/`read`/`play`/`play_pronto` 完整 | **任意碼最乾淨**；你目前沒有 |
 | `lumi.acpartner.v2`（你有 ×2：书房空调、風） | `AirConditioningCompanion` | ✅ `learn`/`send_ir_code`（**FE 格式**） | 冷氣最佳；可學 TV/風扇，但碼是 acpartner 專屬 |
 | `lumi.acpartner.mcn02`（你有：主卧空调） | `AirConditioningCompanionMcn02` | ❌ 只有 on/off/status/send_command | 本地**學不了** IR |
-| `xiaomi.wifispeaker.l05b` / `l05c`（你有） | `WifiSpeaker` | ❌ 無任何 IR 方法 | l05b 無 IR 硬體；l05c（增強版）也沒有。有 IR 的是 `lx5a`/`L05G`，**且仍只能雲端** |
+| `xiaomi.wifispeaker.l05b` / `l05c`（你有） | `WifiSpeaker` | ❌ 無任何本地 IR 方法 | **實測：你的 `l05c` 就是這 6 個 `miir.*` 的 parent blaster（有 IR 硬體）**，但 `WifiSpeaker` 無本地 IR API → **只能雲端** |
 
 !!! warning "「叫小愛用 IR 開電視」是雲端技能，不是本地"
     就算是帶 IR 的小愛（`lx5a`/`L05G`），`python-miio` 的 `WifiSpeaker` 類別**沒有任何 IR 方法**——它的 IR 完全靠小米雲/語音場景驅動。**沒有任何一款小愛音箱能當本地 IR 發射器。**要本地就用 `chuangmi.ir.v2` 或你的 `acpartner.v2`。
@@ -48,8 +48,19 @@
 2. **有 `code`（DIY）**：直接重播——chuangmi base64 → `miiocli chuangmi_ir … play 'raw:<code>'`；`FE…` → 送回**原本那顆 acpartner**。
 3. **沒 `code`（品牌配對）**：`.../controller/info {did}` 拿 `controller_id` → `.../ircode/controller/keys {controller_id}`（或公開碼庫 `sg-urc.io.mi.com/controller/code/1?matchid=…&vendor=mi`）→ AES+gzip 解 → 微秒 → Pronto → `play 'pronto:…'`（僅 `chuangmi.ir.v2`）。
 
-!!! danger "對你這批硬體的實話"
-    你有 `acpartner.v2`（能學/送 `FE`）但**沒有 `chuangmi.ir.v2`**。所以：**若 `miir.tv` 是品牌配對或由小愛/chuangmi 生成**，抽出來的碼是 pronto/chuangmi 格式，**acpartner 送不了**——要嘛買一顆 `chuangmi.ir.v2`，要嘛在 acpartner 上**重學**（Path 2）。逐台 `miir.*` 的 `parent_id` 是 DIY 還品牌配對，會決定走哪條——這個我可以幫你用工具查。
+!!! danger "實測結論（你的設定）"
+    `uv run --group tokens python tools/mi_tokens.py ir` 查出：你 **6 個 `miir.*` 全部掛在 `xiaomi.wifispeaker.l05c`（小愛音箱）** 底下——**2 個品牌配對**（TV 时间窃取器 = FFALCON `matchid 10982`、客厅空调 `matchid 4754`）＋ **4 個 DIY 自學**（圣诞树灯/电暖炉/暖暖地毯/冷风扇）。
+
+    - **小愛音箱沒有本地 IR API** → 這 6 個**沒有一個能經 speaker 本地重播**。
+    - **品牌配對**的碼在小米碼庫（用 matchid 解成 pronto）；**DIY 自學**的碼是雲端 learn、標準端點不直接匯出（al-one 也只是雲端 click，不匯出）。
+    - 你目前**沒有能本地重播的 blaster**（`acpartner` 格式不合且偏 AC）。**要本地控電視，最實際 = 買一顆 `chuangmi.ir.v2`**，再用 [SmartIR](#path-3home-assistant-remote--smartir最佳-ux)（FFALCON 選碼庫）或重學。
+
+### 用 `mi-tokens ir` 查你的遙控
+
+```bash
+uv run --group tokens python tools/mi_tokens.py ir   # 掃碼一次後 session 會快取，之後免掃
+```
+會列出每個 `miir.*` 的 **parent blaster**、鍵數、以及 **DIY(自學) vs 品牌配對(matchid)**，原始 keys/info 寫進 `.secrets/mi-ir.json`。這就是判斷「能不能／怎麼本地化」的第一步。
 
 > 參考實作：[`al-one/hass-xiaomi-miot`](https://github.com/al-one/hass-xiaomi-miot) 的 `remote.py`（列 controllers/keys、雲端 click）、[`ysard/mi_remote_database`](https://github.com/ysard/mi_remote_database)（碼庫解密到 pronto/Flipper）、[`MiEcosystem/miot-plugin-sdk`](https://github.com/MiEcosystem/miot-plugin-sdk) 的 `ircontroller.js`（官方 API）。
 
