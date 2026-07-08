@@ -103,6 +103,7 @@ nav:
       - 點對點橋接: solutions/point-to-point.md
   - 參考:
       - 我的裝置: reference/devices.md
+      - 硬體慣例與選型: reference/hardware-notes.md
       - 連結彙整: reference/links.md
       - 本站開發: getting-started.md
 

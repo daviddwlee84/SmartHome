@@ -375,6 +375,94 @@ def cmd_ir(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ir_send(a: argparse.Namespace) -> int:
+    """雲端觸發某遙控的某顆鍵（經 parent blaster 發射）——DIY/品牌配對皆可，免本地硬體。"""
+    if not IR_JSON.exists():
+        print("[mi-tokens] 先跑 `... ir` 建立 .secrets/mi-ir.json", file=sys.stderr)
+        return 1
+    ir = json.loads(IR_JSON.read_text(encoding="utf-8"))
+    tgt = next(((did, r) for did, r in ir.items()
+                if a.remote.lower() in (str(r.get("name", "")) + r.get("model", "") + did).lower()), None)
+    if not tgt:
+        print("[mi-tokens] 找不到遙控。可用：" + ", ".join(r["name"] for r in ir.values()), file=sys.stderr)
+        return 1
+    did, r = tgt
+    keys = ((r.get("raw_keys") or {}).get("result") or {}).get("keys") or []
+    k = next((x for x in keys if a.key.upper() in (str(x.get("name", "")) + str(x.get("display_name", ""))).upper()), None)
+    if not k:
+        print(f"[mi-tokens] {r['name']} 沒有含「{a.key}」的鍵。可用："
+              + ", ".join(f"{x['id']}:{x['name']}" for x in keys), file=sys.stderr)
+        return 1
+    mod = _load_extractor()
+    conn, _ = _connector(mod, force_login=a.relogin)
+    cid = int(r.get("controller_id") or 0)
+    payload = {"did": did, "key_id": int(k["id"])}
+    if cid:
+        payload["controller_id"] = cid
+    country = r.get("region", "cn")
+    resp = _api(conn, country, "/v2/irdevice/controller/key/click", payload)
+    ok = isinstance(resp, dict) and resp.get("code") == 0
+    print(f"[mi-tokens] {'✅ 已送出' if ok else '❌ 失敗'}：{k['name']}"
+          f"（{k.get('display_name', '')}）→ {r['name']}（雲端 → {r.get('parent_model', '')} 發射）"
+          + ("" if ok else f" — {resp}"))
+    for _ in range(max(0, a.repeat - 1)):
+        if ok:
+            _api(conn, country, "/v2/irdevice/controller/key/click", payload)
+    if ok and a.repeat > 1:
+        print(f"[mi-tokens]   （共送 {a.repeat} 次）")
+    return 0 if ok else 1
+
+
+EXTERNAL = REPO / ".external"
+YSARD_DIR = EXTERNAL / "mi_remote_database"
+
+
+def _ensure_ysard() -> None:
+    if (YSARD_DIR / "src" / "crypt_utils.py").exists():
+        return
+    print(f"[mi-tokens] clone IR 碼庫工具到 {YSARD_DIR} …")
+    subprocess.run(["git", "clone", "--depth", "1",
+                    "https://github.com/ysard/mi_remote_database", str(YSARD_DIR)], check=True)
+
+
+def _timings_to_pronto(timings: list, freq: int) -> str:
+    """微秒 ON/OFF 時序 + 載波頻率 → Pronto hex（可餵給 chuangmi.ir.v2 play_pronto）。"""
+    fw = round(1_000_000 / (freq * 0.241246))
+    cycles = [max(1, round(t * freq / 1_000_000)) for t in timings]
+    if len(cycles) % 2:
+        cycles.append(1)
+    words = [0x0000, fw, len(cycles) // 2, 0x0000] + cycles
+    return " ".join(f"{w:04X}" for w in words)
+
+
+def cmd_ir_code(a: argparse.Namespace) -> int:
+    """給 IRDB matchid（如 xm_1_199），抓碼 → 解密 → 每顆鍵輸出 Pronto。"""
+    _ensure_ysard()
+    sys.path.insert(0, str(YSARD_DIR / "src"))
+    import crypt_utils as cu  # ysard (AGPL)：僅本機引用、不隨本 repo 散布
+    txt = cu.build_url("/controller/code/1", [("matchid", a.matchid), ("vendor", "mi")], country=a.country)
+    data = (json.loads(txt) or {}).get("data")
+    if not isinstance(data, dict) or not data.get("key"):
+        print(f"[mi-tokens] IRDB 查無 matchid={a.matchid}。"
+              "\n  注意：米家帳號的 controller_id（如你 TV 的 10982）不是 IRDB matchid，"
+              "不能直接查——請從 IRDB 品牌樹找型號，或改用 SmartIR。", file=sys.stderr)
+        return 1
+    freq = int(data.get("frequency") or 38000)
+    out = {}
+    for btn, enc in data["key"].items():
+        try:
+            out[btn] = {"frequency": freq, "pronto": _timings_to_pronto(cu.process_xiaomi_shit(enc), freq)}
+        except Exception as e:  # noqa: BLE001
+            out[btn] = {"error": f"{type(e).__name__}: {e}"}
+    path = SECRETS_DIR / f"ir-code-{a.matchid}.json"
+    _write_secret(path, json.dumps(out, ensure_ascii=False, indent=2))
+    print(f"[mi-tokens] matchid={a.matchid} freq={freq}Hz，{len(out)} 顆鍵 → {path}")
+    for btn, v in list(out.items())[:8]:
+        print(f"  {btn:18} {str(v.get('pronto', v.get('error','')))[:52]}…")
+    print("\n重播：chuangmi.ir.v2 → `miiocli chuangmi_ir play 'pronto:<hex>'`（或 HA remote.send_command）。")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(
         prog="mi-tokens",
@@ -406,6 +494,18 @@ def main() -> int:
     pi.add_argument("--server", action="append", help="區域(可重複)；預設 tw sg cn")
     pi.add_argument("--relogin", action="store_true", help="強制重新 QR 登入（忽略存的 session）")
     pi.set_defaults(func=cmd_ir)
+
+    ps = sub.add_parser("ir-send", help="雲端觸發遙控某鍵（免本地硬體，DIY/品牌皆可）")
+    ps.add_argument("--remote", required=True, help="遙控名稱/型號/did（子字串）")
+    ps.add_argument("--key", required=True, help="鍵名（子字串，如 VOL+ / POWER）")
+    ps.add_argument("--repeat", type=int, default=1, help="送幾次")
+    ps.add_argument("--relogin", action="store_true")
+    ps.set_defaults(func=cmd_ir_send)
+
+    pc = sub.add_parser("ir-code", help="IRDB matchid → 每鍵 Pronto（給 chuangmi.ir.v2）")
+    pc.add_argument("--matchid", required=True, help="IRDB matchid，如 xm_1_199")
+    pc.add_argument("--country", default="CN", help="碼區域（部分碼有地區差異）")
+    pc.set_defaults(func=cmd_ir_code)
 
     a = p.parse_args()
     if not getattr(a, "func", None):
