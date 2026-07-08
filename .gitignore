@@ -6,6 +6,12 @@ __pycache__/
 # MkDocs build output
 site/
 
+# Cloned third-party tools (not vendored)
+.external/
+
+# Extracted secrets: device tokens, BLE keys (never commit)
+.secrets/
+
 # OS
 .DS_Store
 

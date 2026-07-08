@@ -1944,6 +1944,13 @@ miio = [
 mijia = [
     { name = "mijiaapi" },
 ]
+tokens = [
+    { name = "charset-normalizer" },
+    { name = "colorama" },
+    { name = "pillow" },
+    { name = "pycryptodome" },
+    { name = "requests" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1962,6 +1969,13 @@ miio = [
     { name = "python-miio" },
 ]
 mijia = [{ name = "mijiaapi" }]
+tokens = [
+    { name = "charset-normalizer" },
+    { name = "colorama" },
+    { name = "pillow" },
+    { name = "pycryptodome" },
+    { name = "requests" },
+]
 
 [[package]]
 name = "soupsieve"

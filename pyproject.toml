@@ -37,3 +37,12 @@ mcp = [
 mijia = [
     "mijiaAPI",
 ]
+# 抽 device token（官方雲、支援 tw/sg）：自製 tools/mi_tokens.py 用；
+# 鏡像 Xiaomi-cloud-tokens-extractor 的 requirements.txt
+tokens = [
+    "requests",
+    "pycryptodome",
+    "charset-normalizer",
+    "Pillow",
+    "colorama",
+]
