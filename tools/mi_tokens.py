@@ -509,15 +509,20 @@ def cmd_ir_ac(a: argparse.Namespace) -> int:
         return 1
     ir = json.loads(IR_JSON.read_text(encoding="utf-8"))
     if a.remote:
-        tgt = next(((did, r) for did, r in ir.items()
-                    if a.remote.lower() in (str(r.get("name", "")) + r.get("model", "") + did).lower()), None)
+        matches = [(did, r) for did, r in ir.items()
+                   if a.remote.lower() in (str(r.get("name", "")) + r.get("model", "") + did).lower()]
     else:
-        tgt = next(((did, r) for did, r in ir.items() if r["model"].startswith("miir.aircondition")), None)
-    if not tgt:
-        print("[mi-tokens] 找不到冷氣遙控（miir.aircondition.*）", file=sys.stderr)
+        matches = [(did, r) for did, r in ir.items() if r["model"].startswith("miir.aircondition")]
+    if not matches:
+        print("[mi-tokens] 找不到冷氣遙控（miir.aircondition.*）；用 `... ir` 看清單", file=sys.stderr)
         return 1
-    did, r = tgt
+    if len(matches) > 1:
+        print("[mi-tokens] 有多台冷氣遙控，請用 --remote 指定："
+              + "、".join(r["name"] for _, r in matches), file=sys.stderr)
+        return 1
+    did, r = matches[0]
     country = r.get("region", "cn")
+    print(f"[mi-tokens] 目標冷氣：{r['name']}（{r['model']}）")
     if a.temp is not None and not (16 <= a.temp <= 30):
         print("[mi-tokens] --temp 需 16-30", file=sys.stderr)
         return 1

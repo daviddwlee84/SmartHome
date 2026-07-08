@@ -40,3 +40,6 @@ MCP 和 Agent Skill 定位不同，別搞混：
 - **固定工作流**（例如「離家模式：關燈、關插座、掃地機回充」）→ 寫成 Skill，內部去打 [CLI](cli.md) 或 HA 的 REST API。
 
 兩者可並用：Skill 負責「劇本」，MCP／CLI 負責「執行」。
+
+!!! tip "本 repo 已內建 `mijia-ir` skill"
+    `.claude/skills/mijia-ir/SKILL.md` 包住 `mi-tokens ir-send`／`ir-ac`——在 Claude Code 裡直接說「電視靜音」「開客廳冷氣 26 度」就會執行（走雲端 IR、免 HA）。等你架好 HA，改用 [HA 內建 MCP](../solutions/home-assistant.md#接-claudeha-內建-mcp-server) 更通用。
