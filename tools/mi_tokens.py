@@ -23,6 +23,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -167,19 +168,73 @@ def cmd_list(a: argparse.Namespace) -> int:
     return 0
 
 
+def _norm_mac(mac: str) -> str:
+    return ":".join(f"{int(p, 16):02X}" for p in mac.split(":"))
+
+
+def _arp_ip_for(mac: str) -> str | None:
+    """查目前 LAN 上這個 MAC 的即時 IP（cloud 回的 localip 常過期）。"""
+    if not mac:
+        return None
+    try:
+        target = _norm_mac(mac)
+    except ValueError:
+        return None
+    out = subprocess.run(["arp", "-an"], capture_output=True, text=True).stdout
+    for ln in out.splitlines():
+        if "incomplete" in ln:
+            continue
+        m = re.search(r"\(([\d.]+)\) at ([0-9a-fA-F:]+)", ln)
+        if not m:
+            continue
+        try:
+            if _norm_mac(m.group(2)) == target:
+                return m.group(1)
+        except ValueError:
+            continue
+    return None
+
+
 def cmd_verify(a: argparse.Namespace) -> int:
-    """用已安裝的 miiocli 對某台裝置做 LAN 驗證，證明 token 本地可用。"""
+    """對某台裝置做 LAN 本地驗證（直接用 python-miio API，不經有 bug 的 miiocli CLI）。"""
     rows = json.loads(Path(a.out).read_text(encoding="utf-8"))
     dev = next((r for r in rows if r.get("did") == a.did), None)
-    if not dev or not dev.get("localip") or not dev.get("token"):
-        print(f"[mi-tokens] {a.did} 沒有 localip/token，無法本地驗證", file=sys.stderr)
+    if not dev:
+        print(f"[mi-tokens] 找不到 did={a.did}", file=sys.stderr)
         return 1
-    cmd = [
-        "uv", "run", "--group", "miio", "miiocli", "device",
-        "--ip", dev["localip"], "--token", dev["token"], "info",
-    ]
-    print(f"[mi-tokens] miiocli device --ip {dev['localip']} --token … info")
-    return subprocess.run(cmd).returncode
+    token = dev.get("token")
+    if not token:
+        print(f"[mi-tokens] {dev.get('model','')} 沒有 token（IR 虛擬遙控/雲端裝置），無法本地驗證", file=sys.stderr)
+        return 1
+    # cloud 的 localip 常過期：優先用 ARP 查該 MAC 的即時 IP
+    ip = dev.get("localip") or ""
+    live = _arp_ip_for(dev.get("mac", ""))
+    if live and live != ip:
+        print(f"[mi-tokens] cloud IP {ip or '-'} 已過期，改用 LAN 現值 {live}")
+        ip = live
+    elif live:
+        ip = live
+    if not ip:
+        print(f"[mi-tokens] {dev.get('model','')} 沒有可用 IP（多半不在你目前的 LAN）", file=sys.stderr)
+        return 1
+    try:
+        from miio import Device
+    except ModuleNotFoundError:
+        raise SystemExit(
+            "[mi-tokens] verify 需要 python-miio，請用：\n"
+            "    uv run --group miio --group tokens python tools/mi_tokens.py verify --did <DID>"
+        )
+    try:
+        info = Device(ip, token).info()
+        print(
+            f"[mi-tokens] ✅ {dev.get('name','')}（{dev.get('model','')}）@ {ip} 本地可控"
+            f" — model={info.model} fw={info.firmware_version}"
+        )
+        return 0
+    except Exception as e:  # noqa: BLE001 — 回報任何本地失敗
+        print(f"[mi-tokens] ❌ {dev.get('model','')} @ {ip} 本地失敗：{type(e).__name__}: {e}")
+        print("   （多半是裝置離線、或你不在該裝置所在的 LAN）", file=sys.stderr)
+        return 1
 
 
 def main() -> int:
