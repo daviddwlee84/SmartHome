@@ -45,4 +45,5 @@ tokens = [
     "charset-normalizer",
     "Pillow",
     "colorama",
+    "qrcode",
 ]

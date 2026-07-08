@@ -258,6 +258,27 @@ def _save_session(conn) -> None:
     }, indent=2))
 
 
+def _install_terminal_qr(conn) -> None:
+    """把登入 QR 直接畫在終端機（python-qrcode）；browser :31415 仍保留為 fallback。"""
+    try:
+        import qrcode
+    except ImportError:
+        return
+    orig = conn.login_step_2
+
+    def step2():
+        url = getattr(conn, "_login_url", None)
+        if url:
+            print("\n[mi-tokens] 用『米家 App』掃描下方 QR：\n")
+            qr = qrcode.QRCode(border=1)
+            qr.add_data(url)
+            qr.make(fit=True)
+            qr.print_ascii(invert=True)
+        return orig()
+
+    conn.login_step_2 = step2
+
+
 def _connector(mod, force_login: bool = False):
     """回傳登入好的 connector；能沿用 .secrets/mi-session.json 就不重掃 QR。"""
     conn = mod.QrCodeXiaomiCloudConnector()
@@ -267,7 +288,8 @@ def _connector(mod, force_login: bool = False):
         conn._ssecurity = sess["ssecurity"]
         conn._serviceToken = sess["serviceToken"]
         return conn, True
-    print("[mi-tokens] 免密碼 QR 登入 — 開瀏覽器掃碼（見下方網址），用『米家 App』掃：")
+    _install_terminal_qr(conn)
+    print("[mi-tokens] 免密碼 QR 登入（掃終端機 QR，或開 http://127.0.0.1:31415）：")
     if not conn.login():
         raise SystemExit("[mi-tokens] 登入失敗（QR 逾時或被取消）")
     _save_session(conn)
@@ -388,6 +410,11 @@ def cmd_ir_send(a: argparse.Namespace) -> int:
         return 1
     did, r = tgt
     keys = ((r.get("raw_keys") or {}).get("result") or {}).get("keys") or []
+    if not a.key:
+        print(f"[mi-tokens] {r['name']}（{r['model']}）可用的鍵（{len(keys)}）：")
+        for x in keys:
+            print(f"  {str(x.get('name','')):16} {x.get('display_name','')}")
+        return 0
     k = next((x for x in keys if a.key.upper() in (str(x.get("name", "")) + str(x.get("display_name", ""))).upper()), None)
     if not k:
         print(f"[mi-tokens] {r['name']} 沒有含「{a.key}」的鍵。可用："
@@ -463,6 +490,70 @@ def cmd_ir_code(a: argparse.Namespace) -> int:
     return 0
 
 
+_AC_MODES = {"auto": 0, "cool": 1, "dry": 2, "heat": 3, "fan": 4}
+
+
+def _miot_ok(resp) -> bool:
+    if not isinstance(resp, dict) or resp.get("code") != 0:
+        return False
+    res = resp.get("result")
+    if isinstance(res, list):
+        return all(x.get("code", 0) == 0 for x in res if isinstance(x, dict))
+    return True
+
+
+def cmd_ir_ac(a: argparse.Namespace) -> int:
+    """冷氣絕對控制（走 MIoT-spec 設溫度/模式/開關）——TV 音量做不到絕對，但冷氣是狀態式的。"""
+    if not IR_JSON.exists():
+        print("[mi-tokens] 先跑 `... ir` 建立 .secrets/mi-ir.json", file=sys.stderr)
+        return 1
+    ir = json.loads(IR_JSON.read_text(encoding="utf-8"))
+    if a.remote:
+        tgt = next(((did, r) for did, r in ir.items()
+                    if a.remote.lower() in (str(r.get("name", "")) + r.get("model", "") + did).lower()), None)
+    else:
+        tgt = next(((did, r) for did, r in ir.items() if r["model"].startswith("miir.aircondition")), None)
+    if not tgt:
+        print("[mi-tokens] 找不到冷氣遙控（miir.aircondition.*）", file=sys.stderr)
+        return 1
+    did, r = tgt
+    country = r.get("region", "cn")
+    if a.temp is not None and not (16 <= a.temp <= 30):
+        print("[mi-tokens] --temp 需 16-30", file=sys.stderr)
+        return 1
+    mode_val = None
+    if a.mode:
+        mode_val = _AC_MODES.get(a.mode.lower())
+        if mode_val is None:
+            print("[mi-tokens] --mode 需為 " + "/".join(_AC_MODES), file=sys.stderr)
+            return 1
+    mod = _load_extractor()
+    conn, _ = _connector(mod, force_login=a.relogin)
+    if a.status:
+        info = _api(conn, country, "/v2/irdevice/controller/info", {"did": did})
+        print(f"[mi-tokens] {r['name']} 目前 ac_state：{(info or {}).get('result', {}).get('ac_state')}")
+        return 0
+    if a.off:
+        resp = _api(conn, country, "/miotspec/action", {"params": {"did": did, "siid": 2, "aiid": 5, "in": []}})
+        print(f"[mi-tokens] {'✅ 已關冷氣' if _miot_ok(resp) else f'❌ {resp}'}")
+        return 0 if _miot_ok(resp) else 1
+    props = []
+    if mode_val is not None:
+        props.append({"did": did, "siid": 2, "piid": 1, "value": mode_val})
+    if a.temp is not None:
+        props.append({"did": did, "siid": 2, "piid": 2, "value": a.temp})
+    if not props and not a.on:
+        print("[mi-tokens] 指定 --temp / --mode / --on / --off / --status 其一", file=sys.stderr)
+        return 1
+    if props:
+        resp = _api(conn, country, "/miotspec/prop/set", {"params": props})
+        tag = (a.mode or "") + (f" {a.temp}°C" if a.temp is not None else "")
+        print(f"[mi-tokens] 設定{tag}：{'✅' if _miot_ok(resp) else '❌ ' + str(resp)}")
+    resp = _api(conn, country, "/miotspec/action", {"params": {"did": did, "siid": 2, "aiid": 6, "in": []}})
+    print(f"[mi-tokens] 開機/送出：{'✅ 已送出（看冷氣有沒有反應）' if _miot_ok(resp) else '❌ ' + str(resp)}")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(
         prog="mi-tokens",
@@ -497,7 +588,7 @@ def main() -> int:
 
     ps = sub.add_parser("ir-send", help="雲端觸發遙控某鍵（免本地硬體，DIY/品牌皆可）")
     ps.add_argument("--remote", required=True, help="遙控名稱/型號/did（子字串）")
-    ps.add_argument("--key", required=True, help="鍵名（子字串，如 VOL+ / POWER）")
+    ps.add_argument("--key", help="鍵名（子字串，如 VOL+ / POWER）；省略則列出可用鍵")
     ps.add_argument("--repeat", type=int, default=1, help="送幾次")
     ps.add_argument("--relogin", action="store_true")
     ps.set_defaults(func=cmd_ir_send)
@@ -506,6 +597,16 @@ def main() -> int:
     pc.add_argument("--matchid", required=True, help="IRDB matchid，如 xm_1_199")
     pc.add_argument("--country", default="CN", help="碼區域（部分碼有地區差異）")
     pc.set_defaults(func=cmd_ir_code)
+
+    pa = sub.add_parser("ir-ac", help="冷氣絕對控制（設溫度/模式/開關，MIoT-spec）")
+    pa.add_argument("--remote", help="冷氣遙控（子字串）；預設第一個 miir.aircondition")
+    pa.add_argument("--temp", type=int, help="目標溫度 16-30")
+    pa.add_argument("--mode", help="模式：auto/cool/dry/heat/fan")
+    pa.add_argument("--on", action="store_true", help="開機")
+    pa.add_argument("--off", action="store_true", help="關機")
+    pa.add_argument("--status", action="store_true", help="讀目前 ac_state")
+    pa.add_argument("--relogin", action="store_true")
+    pa.set_defaults(func=cmd_ir_ac)
 
     a = p.parse_args()
     if not getattr(a, "func", None):

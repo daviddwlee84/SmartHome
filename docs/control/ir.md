@@ -58,9 +58,10 @@
 ### 用 `mi-tokens ir` 查你的遙控
 
 ```bash
-uv run --group tokens python tools/mi_tokens.py ir   # 掃碼一次後 session 會快取，之後免掃
+uv run --group tokens python tools/mi_tokens.py ir   # 登入 QR 直接畫在終端機（掃不到再開 :31415），掃一次後 session 快取
 ```
-會列出每個 `miir.*` 的 **parent blaster**、鍵數、以及 **DIY(自學) vs 品牌配對(matchid)**，原始 keys/info 寫進 `.secrets/mi-ir.json`。這就是判斷「能不能／怎麼本地化」的第一步。
+
+會列出每個 `miir.*` 的 **parent blaster**、鍵數、以及 **DIY(自學) vs 品牌配對(matchid)**，原始 keys/info 寫進 `.secrets/mi-ir.json`。
 
 ### 現在就能用：雲端觸發 `ir-send`（免硬體）
 
@@ -72,6 +73,25 @@ uv run --group tokens python tools/mi_tokens.py ir-send --remote 冷风扇 --key
 ```
 
 缺點：走雲端（依賴網路＋小米）、且要 speaker 在家電 IR 射程內。但**零硬體、可腳本化 / 給 Claude**。
+
+**列出可用的鍵**：省略 `--key` 就印出該遙控全部按鍵：
+
+```bash
+uv run --group tokens python tools/mi_tokens.py ir-send --remote 时间窃取器   # → POWER/电源, MUTE/静音, VOL+, INPUT …
+```
+
+!!! note "「設音量到 30」——電視做不到，冷氣可以"
+    IR 電視是**無狀態、單向、無回饋**——只有 `VOL+`/`VOL-`，沒有絕對「設到 30」（硬要只能按 `VOL-` 到底再 `VOL+`×30，不可靠）。但**冷氣是狀態式的**（`ac_state`），可絕對設定。
+
+### 冷氣絕對控制 `ir-ac`（走 MIoT-spec）
+
+```bash
+uv run --group tokens python tools/mi_tokens.py ir-ac --status                # 讀目前 ac_state
+uv run --group tokens python tools/mi_tokens.py ir-ac --temp 26 --mode cool   # 設 26°C 制冷並開機
+uv run --group tokens python tools/mi_tokens.py ir-ac --off                   # 關機
+```
+
+走 `/miotspec/prop/set`（ir-mode `siid2/piid1`：auto/cool/dry/heat/fan＝0–4；ir-temperature `siid2/piid2`：16–30）＋ `/miotspec/action`（開 aiid6 / 關 aiid5），與 `hass-xiaomi-miot` 同一條路。
 
 ### `ir-code`：把 IRDB matchid 解成 Pronto（本地重播用）
 
