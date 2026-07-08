@@ -19,3 +19,21 @@ docs = [
     "mkdocs-copy-to-llm>=0.1",
     "pymdown-extensions>=10.7",
 ]
+
+# 各控制情境（scenario）的相依分組。用 `uv sync --group <name>` 安裝，或
+# `uv run --group <name> <cmd>` 臨時執行；彼此獨立、可只裝需要的那組。
+# 例：uv run --group miio miiocli cloud
+[dependency-groups]
+# 本地控制 / 抓 token：python-miio 的 miiocli（先用這組登入試試）
+miio = [
+    "python-miio",   # miiocli：本地 miIO 控制
+    "micloud",       # miiocli cloud 登入、抓 device token 用
+]
+# 雲端 MCP server：給 Claude / Agent 直接控制
+mcp = [
+    "miot-mcp",
+]
+# 雲端 SDK：mijiaAPI（MijiaPilot 的基礎）
+mijia = [
+    "mijiaAPI",
+]
