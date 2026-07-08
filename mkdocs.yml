@@ -90,6 +90,7 @@ nav:
       - Matter: concepts/matter.md
   - 控制介面:
       - CLI: control/cli.md
+      - IR 紅外線: control/ir.md
       - MCP 與 Agent Skills: control/mcp.md
   - 生態聯動:
       - Apple Home / Siri: ecosystem/apple-home.md
